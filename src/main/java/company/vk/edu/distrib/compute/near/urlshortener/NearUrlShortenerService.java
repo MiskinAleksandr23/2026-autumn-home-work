@@ -19,6 +19,10 @@ import org.slf4j.LoggerFactory;
 public final class NearUrlShortenerService implements UrlShortenerService {
     private static final Logger log = LoggerFactory.getLogger(NearUrlShortenerService.class);
     private static final String LINKS_PATH = "/v0/links";
+    private static final String STATUS_PATH = "/v0/status";
+    private static final String USERS_PATH = "/internal/users";
+    private static final String GET = "GET";
+    private static final String POST = "POST";
     private static final String CONTENT_TYPE = "text/html; charset=utf-8";
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private static final int ID_LENGTH = 10;
@@ -79,15 +83,15 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     private void route(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
-        if ("/v0/status".equals(path)) {
-            respond(exchange, "GET".equals(method) ? 200 : 405, "");
+        if (STATUS_PATH.equals(path)) {
+            respond(exchange, GET.equals(method) ? 200 : 405, "");
             return;
         }
-        if ("/internal/users".equals(path)) {
+        if (USERS_PATH.equals(path)) {
             createUser(exchange);
             return;
         }
-        if ("GET".equals(method) && path.indexOf('/', 1) < 0) {
+        if (GET.equals(method) && path.indexOf('/', 1) < 0) {
             String id = path.substring(1);
             validateId(id);
             exchange.getResponseHeaders().set("Location", URI.create(links.get(id)).toASCIIString());
@@ -99,30 +103,26 @@ public final class NearUrlShortenerService implements UrlShortenerService {
             respond(exchange, 401, "");
             return;
         }
+        routeLinks(exchange, path);
+    }
+
+    private void routeLinks(HttpExchange exchange, String path) throws IOException {
         if (LINKS_PATH.equals(path)) {
-            if ("POST".equals(method)) {
+            if (POST.equals(exchange.getRequestMethod())) {
                 createLink(exchange);
             } else {
                 respond(exchange, 405, "");
             }
-        } else if (path.startsWith(LINKS_PATH + "/")) {
-            handleLink(exchange, path.substring(LINKS_PATH.length() + 1));
-        } else {
-            respond(exchange, 404, "");
+            return;
         }
-    }
-
-    private void createLink(HttpExchange exchange) throws IOException {
-        String link = readLink(exchange);
-        String id = newId();
-        links.upsert(id, link);
-        respond(exchange, 201, "http://localhost:" + port + "/" + id);
-    }
-
-    private void handleLink(HttpExchange exchange, String id) throws IOException {
+        if (!path.startsWith(LINKS_PATH + "/")) {
+            respond(exchange, 404, "");
+            return;
+        }
+        String id = path.substring(LINKS_PATH.length() + 1);
         validateId(id);
         switch (exchange.getRequestMethod()) {
-            case "GET" -> respond(exchange, 200, links.get(id));
+            case GET -> respond(exchange, 200, links.get(id));
             case "PUT" -> {
                 String link = readLink(exchange);
                 links.get(id);
@@ -137,10 +137,18 @@ public final class NearUrlShortenerService implements UrlShortenerService {
         }
     }
 
+    private void createLink(HttpExchange exchange) throws IOException {
+        String link = readLink(exchange);
+        String id = newId();
+        links.upsert(id, link);
+        respond(exchange, 201, "http://localhost:" + port + "/" + id);
+    }
+
     private String newId() throws IOException {
         String id;
+        StringBuilder builder = new StringBuilder(ID_LENGTH);
         do {
-            StringBuilder builder = new StringBuilder(ID_LENGTH);
+            builder.setLength(0);
             for (int i = 0; i < ID_LENGTH; i++) {
                 builder.append(ALPHABET.charAt(random.nextInt(ALPHABET.length())));
             }
@@ -159,7 +167,7 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     private void createUser(HttpExchange exchange) throws IOException {
-        if (!"POST".equals(exchange.getRequestMethod())) {
+        if (!POST.equals(exchange.getRequestMethod())) {
             respond(exchange, 405, "");
             return;
         }
