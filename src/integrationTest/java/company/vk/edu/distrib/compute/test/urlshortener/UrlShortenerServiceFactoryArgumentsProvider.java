@@ -1,6 +1,7 @@
 package company.vk.edu.distrib.compute.test.urlshortener;
 
 import company.vk.edu.distrib.compute.AbstractHttpServiceFactory;
+import company.vk.edu.distrib.compute.test.AbstractArgumentsProvider;
 import company.vk.edu.distrib.compute.urlshortener.UrlShortenerTest;
 import org.junit.jupiter.params.provider.ArgumentsProvider;
 
