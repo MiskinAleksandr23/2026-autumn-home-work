@@ -1,6 +1,7 @@
 package company.vk.edu.distrib.compute.test;
 
-import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -13,9 +14,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
+
+import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.function.Executable;
 
 public enum TestUtils {
     ;
+
+    public static final ScopedValue<HttpContext> HTTP_CONTEXT = ScopedValue.newInstance();
 
     public static final Duration TIMEOUT = Duration.ofSeconds(5);
     public static final String TEST_LINK_ID = "10db3750xY";
@@ -25,8 +32,7 @@ public enum TestUtils {
     public static final Credentials TEST_CREDENTIALS = new Credentials("test-user", "super_pass");
     public static final Credentials SPOTTY_TEST_CREDENTIALS = new Credentials("spotty", "tasty bones");
 
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(2);
-    private static final String LINKS_PATH = "/v0/links/";
+    public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(2);
 
     public static int randomPort() {
         for (int j = 0; j < 5; j++) {
@@ -55,80 +61,150 @@ public enum TestUtils {
         }
     }
 
-    public static int status(HttpClient httpClient, int port) throws IOException, URISyntaxException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-            .GET()
-            .uri(new URI("http://localhost:" + port + "/v0/status"))
-            .timeout(REQUEST_TIMEOUT)
-            .build();
-        HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-        return response.statusCode();
+    public static void runHttpCtx(HttpClient client, int port, Executable executable) {
+        ScopedValue.where(HTTP_CONTEXT, new HttpContext(client, port)).run(() -> {
+            try {
+                executable.execute();
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
-    public static HttpResponse<String> create(HttpClient httpClient, int port, String longLink)
-        throws IOException, InterruptedException, URISyntaxException {
-        return create(httpClient, port, longLink, TEST_CREDENTIALS);
+    public static int status() {
+        try {
+            HttpContext httpContext = HTTP_CONTEXT.get();
+            HttpRequest request = HttpRequest.newBuilder()
+                .GET()
+                .uri(new URI("http://localhost:" + httpContext.port() + "/v0/status"))
+                .timeout(REQUEST_TIMEOUT)
+                .build();
+            HttpResponse<Void> response = httpContext.client().send(request, HttpResponse.BodyHandlers.discarding());
+            return response.statusCode();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public static HttpResponse<String> create(HttpClient httpClient, int port, String longLink, Credentials credentials)
-        throws IOException, InterruptedException, URISyntaxException {
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-            .POST(HttpRequest.BodyPublishers.ofString(longLink))
-            .uri(new URI("http://localhost:" + port + "/v0/links"))
-            .header("Content-Type", CONTENT_TYPE_TEXT)
-            .timeout(REQUEST_TIMEOUT);
-        withAuthorization(request, credentials);
-        return httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    public static HttpResponse<String> get(String path) {
+        return get(null, path, String.class);
     }
 
-    public static HttpResponse<String> get(HttpClient httpClient, int port, String id)
-        throws IOException, InterruptedException, URISyntaxException {
-        return get(httpClient, port, id, TEST_CREDENTIALS);
+    public static <T> HttpResponse<T> get(String path, Class<T> clazz) {
+        return get(null, path, clazz);
     }
 
-    public static HttpResponse<String> get(HttpClient httpClient, int port, String id, Credentials credentials)
-        throws IOException, InterruptedException, URISyntaxException {
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-            .GET()
-            .uri(new URI("http://localhost:%d%s%s".formatted(port, LINKS_PATH, id)))
-            .timeout(REQUEST_TIMEOUT);
-        withAuthorization(request, credentials);
-        return httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    public static <T> HttpResponse<T> get(@Nullable Credentials credentials, String path, Class<T> clazz) {
+        try {
+            HttpContext httpContext = HTTP_CONTEXT.get();
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .GET()
+                .uri(new URI("http://localhost:%d%s".formatted(httpContext.port(), path)))
+                .timeout(REQUEST_TIMEOUT);
+            if (credentials != null) {
+                withAuthorization(request, credentials);
+            }
+            return httpContext.client().send(request.build(), bodyHandlerOf(clazz));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public static HttpResponse<Void> update(HttpClient httpClient, int port, String id, String longLink)
-        throws IOException, InterruptedException, URISyntaxException {
-        return update(httpClient, port, id, longLink, TEST_CREDENTIALS);
+    public static HttpResponse<Void> update(String path, String value) {
+        return update(null, path, isOfString(value));
     }
 
-    public static HttpResponse<Void> update(HttpClient httpClient, int port, String id, String longLink, Credentials credentials)
-        throws IOException, InterruptedException, URISyntaxException {
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-            .PUT(HttpRequest.BodyPublishers.ofString(longLink))
-            .uri(new URI("http://localhost:%d%s%s".formatted(port, LINKS_PATH, id)))
-            .header("Content-Type", CONTENT_TYPE_TEXT)
-            .timeout(REQUEST_TIMEOUT);
-        withAuthorization(request, credentials);
-        return httpClient.send(request.build(), HttpResponse.BodyHandlers.discarding());
+    public static HttpResponse<Void> update(String path, byte[] value) {
+        return update(null, path, isOfBytes(value));
     }
 
-    public static HttpResponse<Void> delete(HttpClient httpClient, int port, String id)
-        throws IOException, InterruptedException, URISyntaxException {
-        return delete(httpClient, port, id, TEST_CREDENTIALS);
+    public static HttpResponse<Void> update(String path, Supplier<? extends InputStream> bodySupplier) {
+        return update(null, path, bodySupplier);
     }
 
-    public static HttpResponse<Void> delete(HttpClient httpClient, int port, String id, Credentials credentials)
-        throws IOException, InterruptedException, URISyntaxException {
-        HttpRequest.Builder request = HttpRequest.newBuilder()
-            .DELETE()
-            .uri(new URI("http://localhost:%d%s%s".formatted(port, LINKS_PATH, id)))
-            .timeout(REQUEST_TIMEOUT);
-        withAuthorization(request, credentials);
-        return httpClient.send(request.build(), HttpResponse.BodyHandlers.discarding());
+    public static HttpResponse<Void> update(@Nullable Credentials credentials, String path, Supplier<? extends InputStream> bodySupplier) {
+        try {
+            HttpContext httpContext = HTTP_CONTEXT.get();
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .PUT(HttpRequest.BodyPublishers.ofInputStream(bodySupplier))
+                .uri(new URI("http://localhost:%d%s".formatted(httpContext.port(), path)))
+                .header("Content-Type", CONTENT_TYPE_TEXT)
+                .timeout(REQUEST_TIMEOUT);
+            if (credentials != null) {
+                withAuthorization(request, credentials);
+            }
+            return httpContext.client().send(request.build(), HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public static String extractId(int port, String shortLink) throws URISyntaxException {
-        URI uri = new URI(shortLink);
+    public static HttpResponse<Void> delete(String path) {
+        return delete(null, path);
+    }
+
+    public static HttpResponse<Void> delete(@Nullable Credentials credentials, String path) {
+        try {
+            final var httpContext = HTTP_CONTEXT.get();
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .DELETE()
+                .uri(new URI("http://localhost:%d%s".formatted(httpContext.port(), path)))
+                .timeout(REQUEST_TIMEOUT);
+            if (credentials != null) {
+                withAuthorization(request, credentials);
+            }
+            return httpContext.client().send(request.build(), HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static HttpResponse<String> post(String path, String value) {
+        return post(null, path, value);
+    }
+
+    public static HttpResponse<String> post(@Nullable Credentials credentials, String path, String value) {
+        try {
+            HttpContext httpContext = HTTP_CONTEXT.get();
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .POST(HttpRequest.BodyPublishers.ofString(value))
+                .uri(new URI("http://localhost:%d%s".formatted(httpContext.port(), path)))
+                .header("Content-Type", CONTENT_TYPE_TEXT)
+                .timeout(REQUEST_TIMEOUT);
+            if (credentials != null) {
+                withAuthorization(request, credentials);
+            }
+            return httpContext.client().send(request.build(), HttpResponse.BodyHandlers.ofString());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static Supplier<? extends InputStream> isOfBytes(byte[] bytes) {
+        return () -> new ByteArrayInputStream(bytes);
+    }
+
+    public static Supplier<? extends InputStream> isOfString(String str) {
+        return () -> new ByteArrayInputStream(str.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public static <T> HttpResponse.BodyHandler<T> bodyHandlerOf(Class<T> clazz) {
+        if (String.class.isAssignableFrom(clazz)) {
+            return (HttpResponse.BodyHandler<T>) HttpResponse.BodyHandlers.ofString();
+        } else if (byte[].class.isAssignableFrom(clazz)) {
+            return (HttpResponse.BodyHandler<T>) HttpResponse.BodyHandlers.ofByteArray();
+        } else {
+            throw new IllegalArgumentException("unsupported class: " + clazz.getName());
+        }
+    }
+
+    public static String extractId(int port, String shortLink) {
+        final URI uri;
+        try {
+            uri = new URI(shortLink);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Unexpected short link: " + shortLink, e);
+        }
         if (uri.getHost() == null || uri.getPort() != port || uri.getPath() == null) {
             throw new IllegalArgumentException("Unexpected short link: " + shortLink);
         }
@@ -145,7 +221,7 @@ public enum TestUtils {
         return response.headers().firstValue(name).orElseThrow();
     }
 
-    private static void withAuthorization(HttpRequest.Builder request, Credentials credentials) {
+    public static void withAuthorization(HttpRequest.Builder request, Credentials credentials) {
         if (credentials != null) {
             String token = Base64.getEncoder()
                 .encodeToString((credentials.username() + ":" + credentials.password()).getBytes(StandardCharsets.UTF_8));
@@ -153,24 +229,31 @@ public enum TestUtils {
         }
     }
 
-    public static void tryCreateTestUser(HttpClient httpClient, int port) {
+    public static void tryCreateTestUser() {
         try {
-            createUser(httpClient, port, TEST_CREDENTIALS);
+            createUser(TEST_CREDENTIALS);
         } catch (Exception ignored) {
         }
     }
 
-    public static HttpResponse<Void> createUser(HttpClient httpClient, int port, Credentials credentials)
-        throws IOException, InterruptedException, URISyntaxException {
-        HttpRequest request = HttpRequest.newBuilder()
-            .POST(HttpRequest.BodyPublishers.ofString(credentials.username() + ":" + credentials.password()))
-            .uri(new URI("http://localhost:" + port + "/internal/users"))
-            .header("Content-Type", CONTENT_TYPE_TEXT)
-            .timeout(TIMEOUT)
-            .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+    public static HttpResponse<Void> createUser(Credentials credentials) {
+        try {
+            HttpContext httpContext = HTTP_CONTEXT.get();
+            HttpRequest request = HttpRequest.newBuilder()
+                .POST(HttpRequest.BodyPublishers.ofString(credentials.username() + ":" + credentials.password()))
+                .uri(new URI("http://localhost:" + httpContext.port() + "/internal/users"))
+                .header("Content-Type", CONTENT_TYPE_TEXT)
+                .timeout(TIMEOUT)
+                .build();
+            return httpContext.client().send(request, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public record Credentials(String username, String password) {
+    }
+
+    public record HttpContext(HttpClient client, int port) {
     }
 }
