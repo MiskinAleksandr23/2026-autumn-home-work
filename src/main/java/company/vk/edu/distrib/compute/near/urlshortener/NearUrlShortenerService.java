@@ -56,7 +56,7 @@ public final class NearUrlShortenerService implements UrlShortenerService {
 
     @Override
     public void stop() {
-        server.stop(0);
+        server.stop(1);
         try {
             links.close();
             users.close();
