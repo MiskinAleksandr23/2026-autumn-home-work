@@ -35,6 +35,7 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.junit-pioneer:junit-pioneer:2.3.0")
 }
 
 nullaway {
@@ -67,6 +68,10 @@ val integrationTestImplementation = configurations.getByName("integrationTestImp
 val integrationTestRuntimeOnly = configurations.getByName("integrationTestRuntimeOnly")
 
 configurations["integrationTestRuntimeOnly"].extendsFrom(configurations.runtimeOnly.get(), configurations.testRuntimeOnly.get())
+
+dependencies {
+    add("integrationTestImplementation", "org.junit.platform:junit-platform-launcher")
+}
 
 
 tasks.test {
