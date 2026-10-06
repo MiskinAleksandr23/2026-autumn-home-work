@@ -14,6 +14,7 @@ import company.vk.edu.distrib.compute.Dao;
 
 public final class NearRemoteDao implements Dao<String> {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
+    private static final int NOT_FOUND = 404;
 
     private final String endpoint;
     private final HttpClient client;
@@ -29,7 +30,7 @@ public final class NearRemoteDao implements Dao<String> {
     @Override
     public String get(String key) throws IOException {
         HttpResponse<byte[]> response = send(request(key).GET().build());
-        if (response.statusCode() == 404) {
+        if (response.statusCode() == NOT_FOUND) {
             throw new NoSuchElementException(key);
         }
         checkStatus(response, 200);
