@@ -7,6 +7,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -16,6 +17,7 @@ import company.vk.edu.distrib.compute.urlshortener.UrlShortenerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings("PMD.GodClass")
 public final class NearUrlShortenerService implements UrlShortenerService {
     private static final Logger log = LoggerFactory.getLogger(NearUrlShortenerService.class);
     private static final String LINKS_PATH = "/v0/links";
@@ -30,10 +32,11 @@ public final class NearUrlShortenerService implements UrlShortenerService {
 
     private final int port;
     private final HttpServer server;
-    private final Dao<String> links;
+    private Dao<String> links;
     private final Dao<String> users;
     private final BasicAuthentication authentication;
     private final SecureRandom random = new SecureRandom();
+    private boolean started;
 
     public NearUrlShortenerService(int port, Dao<String> links, Dao<String> users) throws IOException {
         this.port = port;
@@ -45,7 +48,25 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     @Override
-    public void start() {
+    public synchronized void setLinksDao(Dao<String> dao) {
+        if (started) {
+            throw new IllegalStateException("Links Dao must be set before start or stop");
+        }
+        Objects.requireNonNull(dao);
+        if (links == dao) {
+            return;
+        }
+        try {
+            links.close();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        links = dao;
+    }
+
+    @Override
+    public synchronized void start() {
+        started = true;
         try {
             server.bind(new InetSocketAddress(port), 0);
         } catch (IOException e) {
@@ -55,11 +76,11 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     @Override
-    public void stop() {
+    public synchronized void stop() {
+        started = true;
         server.stop(1);
-        try {
+        try (users) {
             links.close();
-            users.close();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
