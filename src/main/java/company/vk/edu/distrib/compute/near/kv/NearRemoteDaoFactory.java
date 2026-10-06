@@ -8,9 +8,11 @@ import company.vk.edu.distrib.compute.kv.RemoteDaoFactoryTest;
 
 @RemoteDaoFactoryTest
 public final class NearRemoteDaoFactory implements RemoteDaoFactory<String> {
+    private static final int SUPPORTED_NODE_COUNT = 1;
+
     @Override
     public Dao<String> create(int... ports) throws IOException {
-        if (ports.length != 1) {
+        if (ports.length != SUPPORTED_NODE_COUNT) {
             throw new IllegalArgumentException("Expected exactly one KV port");
         }
         return new NearRemoteDao(ports[0]);

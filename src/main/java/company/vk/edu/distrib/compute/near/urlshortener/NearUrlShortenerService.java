@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -36,6 +38,7 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     private final Dao<String> users;
     private final BasicAuthentication authentication;
     private final SecureRandom random = new SecureRandom();
+    private final Lock lifecycleLock = new ReentrantLock();
     private boolean started;
 
     public NearUrlShortenerService(int port, Dao<String> links, Dao<String> users) throws IOException {
@@ -48,25 +51,30 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     @Override
-    public synchronized void setLinksDao(Dao<String> dao) {
-        if (started) {
-            throw new IllegalStateException("Links Dao must be set before start or stop");
-        }
-        Objects.requireNonNull(dao);
-        if (links == dao) {
-            return;
-        }
+    public void setLinksDao(Dao<String> dao) {
+        lifecycleLock.lock();
         try {
-            links.close();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            if (started) {
+                throw new IllegalStateException("Links Dao must be set before start or stop");
+            }
+            Objects.requireNonNull(dao);
+            if (links == dao) {
+                return;
+            }
+            try {
+                links.close();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            links = dao;
+        } finally {
+            lifecycleLock.unlock();
         }
-        links = dao;
     }
 
     @Override
-    public synchronized void start() {
-        started = true;
+    public void start() {
+        markStarted();
         try {
             server.bind(new InetSocketAddress(port), 0);
         } catch (IOException e) {
@@ -76,13 +84,22 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     @Override
-    public synchronized void stop() {
-        started = true;
+    public void stop() {
+        markStarted();
         server.stop(1);
         try (users) {
             links.close();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private void markStarted() {
+        lifecycleLock.lock();
+        try {
+            started = true;
+        } finally {
+            lifecycleLock.unlock();
         }
     }
 

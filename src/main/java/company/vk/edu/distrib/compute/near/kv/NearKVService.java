@@ -20,6 +20,10 @@ import org.slf4j.LoggerFactory;
 public final class NearKVService implements KVService {
     private static final Logger log = LoggerFactory.getLogger(NearKVService.class);
     private static final String ENTITY_PATH = "/v0/entity";
+    private static final String STATUS_PATH = "/v0/status";
+    private static final String ID_PARAMETER = "id";
+    private static final int SINGLE_THREAD_COUNT = 1;
+    private static final int QUERY_PARAMETER_PARTS = 2;
     private static final byte[] EMPTY_BODY = new byte[0];
 
     private final int port;
@@ -28,14 +32,14 @@ public final class NearKVService implements KVService {
     private final @Nullable ExecutorService executor;
 
     public NearKVService(int port, Dao<byte[]> dao, int threads) throws IOException {
-        if (threads < 1) {
+        if (threads < SINGLE_THREAD_COUNT) {
             throw new IllegalArgumentException("Expected a positive thread count");
         }
         this.port = port;
         this.dao = dao;
         server = HttpServer.create();
         server.createContext("/", this::handle);
-        executor = threads == 1 ? null : Executors.newFixedThreadPool(threads);
+        executor = threads == SINGLE_THREAD_COUNT ? null : Executors.newFixedThreadPool(threads);
         if (executor != null) {
             server.setExecutor(executor);
         }
@@ -81,7 +85,7 @@ public final class NearKVService implements KVService {
 
     private void route(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        if ("/v0/status".equals(path)) {
+        if (STATUS_PATH.equals(path)) {
             respond(exchange, "GET".equals(exchange.getRequestMethod()) ? 200 : 405, EMPTY_BODY);
             return;
         }
@@ -114,8 +118,9 @@ public final class NearKVService implements KVService {
             throw new IllegalArgumentException("Missing id");
         }
         for (String parameter : query.split("&")) {
-            String[] pair = parameter.split("=", 2);
-            if (pair.length == 2 && "id".equals(URLDecoder.decode(pair[0], StandardCharsets.UTF_8))) {
+            String[] pair = parameter.split("=", QUERY_PARAMETER_PARTS);
+            if (pair.length == QUERY_PARAMETER_PARTS
+                && ID_PARAMETER.equals(URLDecoder.decode(pair[0], StandardCharsets.UTF_8))) {
                 return requireKey(URLDecoder.decode(pair[1], StandardCharsets.UTF_8));
             }
         }
