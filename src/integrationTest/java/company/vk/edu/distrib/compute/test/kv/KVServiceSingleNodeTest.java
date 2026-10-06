@@ -8,7 +8,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import company.vk.edu.distrib.compute.AbstractHttpServiceFactory;
 import company.vk.edu.distrib.compute.kv.KVService;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.Parameter;
 import org.junit.jupiter.params.ParameterizedClass;
@@ -31,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 class KVServiceSingleNodeTest {
 
     static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
-    static final String ENTITY_PATH = "/v0/entity/";
+    static final String ENTITY_PATH = "/v0/entity?id=";
 
     @Parameter
     AbstractHttpServiceFactory<KVService> kvServiceFactory;
@@ -46,13 +45,12 @@ class KVServiceSingleNodeTest {
         assertTimeoutPreemptively(TIMEOUT, () -> {
             int port = randomPort();
             KVService storage = kvServiceFactory.create(port);
-            String path = ENTITY_PATH;
             storage.start();
             try {
                 runHttpCtx(HTTP_CLIENT, port, () -> {
-                    assertEquals(400, get(path).statusCode());
-                    assertEquals(400, delete(path).statusCode());
-                    assertEquals(400, update(path, new byte[]{0}).statusCode());
+                    assertEquals(400, get(ENTITY_PATH).statusCode());
+                    assertEquals(400, delete(ENTITY_PATH).statusCode());
+                    assertEquals(400, update(ENTITY_PATH, new byte[]{0}).statusCode());
                 });
             } finally {
                 storage.stop();

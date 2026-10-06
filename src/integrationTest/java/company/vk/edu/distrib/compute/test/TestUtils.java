@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
@@ -34,11 +35,12 @@ public enum TestUtils {
 
     public static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(2);
 
-    public static int randomPort() {
+    public static int randomPort(int... excludes) {
+        Arrays.sort(excludes);
         for (int j = 0; j < 5; j++) {
             for (int i = 0; i < 100_000; i++) {
                 final var port = ThreadLocalRandom.current().nextInt(10000, 60000);
-                if (isTcpPortAvailable(port)) {
+                if (Arrays.binarySearch(excludes, port) < 0 && isTcpPortAvailable(port)) {
                     return port;
                 }
             }

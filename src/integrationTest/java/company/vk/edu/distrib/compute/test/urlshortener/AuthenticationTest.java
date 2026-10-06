@@ -8,7 +8,6 @@ import company.vk.edu.distrib.compute.AbstractHttpServiceFactory;
 import company.vk.edu.distrib.compute.test.TestUtils.Credentials;
 import company.vk.edu.distrib.compute.urlshortener.UrlShortenerService;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.Parameter;
 import org.junit.jupiter.params.ParameterizedClass;
