@@ -97,21 +97,23 @@ public final class NearKVService implements KVService {
         String key = readKey(exchange);
         switch (exchange.getRequestMethod()) {
             case "GET" -> respond(exchange, 200, dao.get(key));
-            case "PUT" -> {
-                byte[] value = exchange.getRequestBody().readNBytes(MAX_VALUE_BYTES + 1);
-                if (value.length > MAX_VALUE_BYTES) {
-                    respond(exchange, 413, EMPTY_BODY);
-                    return;
-                }
-                dao.upsert(key, value);
-                respond(exchange, 201, EMPTY_BODY);
-            }
+            case "PUT" -> putEntity(exchange, key);
             case "DELETE" -> {
                 dao.delete(key);
                 respond(exchange, 202, EMPTY_BODY);
             }
             default -> respond(exchange, 405, EMPTY_BODY);
         }
+    }
+
+    private void putEntity(HttpExchange exchange, String key) throws IOException {
+        byte[] value = exchange.getRequestBody().readNBytes(MAX_VALUE_BYTES + 1);
+        if (value.length > MAX_VALUE_BYTES) {
+            respond(exchange, 413, EMPTY_BODY);
+            return;
+        }
+        dao.upsert(key, value);
+        respond(exchange, 201, EMPTY_BODY);
     }
 
     private static String readKey(HttpExchange exchange) {
