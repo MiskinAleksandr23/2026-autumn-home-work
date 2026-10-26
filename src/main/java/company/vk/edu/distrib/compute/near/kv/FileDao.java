@@ -10,11 +10,14 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.NoSuchElementException;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import company.vk.edu.distrib.compute.Dao;
 
 public final class FileDao implements Dao<byte[]> {
     private final Path directory;
+    private final Lock writeLock = new ReentrantLock();
 
     public FileDao(Path directory) throws IOException {
         this.directory = directory;
@@ -32,19 +35,29 @@ public final class FileDao implements Dao<byte[]> {
 
     @Override
     public void upsert(String key, byte[] value) throws IOException {
-        Path target = pathFor(key);
-        Path temporary = Files.createTempFile(directory, "write-", ".tmp");
+        writeLock.lock();
         try {
-            Files.write(temporary, value);
-            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            Path target = pathFor(key);
+            Path temporary = Files.createTempFile(directory, "write-", ".tmp");
+            try {
+                Files.write(temporary, value);
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
         } finally {
-            Files.deleteIfExists(temporary);
+            writeLock.unlock();
         }
     }
 
     @Override
     public void delete(String key) throws IOException {
-        Files.deleteIfExists(pathFor(key));
+        writeLock.lock();
+        try {
+            Files.deleteIfExists(pathFor(key));
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     @Override

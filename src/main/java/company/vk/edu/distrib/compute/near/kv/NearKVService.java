@@ -24,6 +24,7 @@ public final class NearKVService implements KVService {
     private static final String ID_PARAMETER = "id";
     private static final int SINGLE_THREAD_COUNT = 1;
     private static final int QUERY_PARAMETER_PARTS = 2;
+    private static final int MAX_VALUE_BYTES = 1024 * 1024;
     private static final byte[] EMPTY_BODY = new byte[0];
 
     private final int port;
@@ -97,7 +98,12 @@ public final class NearKVService implements KVService {
         switch (exchange.getRequestMethod()) {
             case "GET" -> respond(exchange, 200, dao.get(key));
             case "PUT" -> {
-                dao.upsert(key, exchange.getRequestBody().readAllBytes());
+                byte[] value = exchange.getRequestBody().readNBytes(MAX_VALUE_BYTES + 1);
+                if (value.length > MAX_VALUE_BYTES) {
+                    respond(exchange, 413, EMPTY_BODY);
+                    return;
+                }
+                dao.upsert(key, value);
                 respond(exchange, 201, EMPTY_BODY);
             }
             case "DELETE" -> {
