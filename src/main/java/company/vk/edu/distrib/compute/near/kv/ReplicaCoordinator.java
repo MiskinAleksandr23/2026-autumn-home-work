@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
@@ -24,6 +23,7 @@ import org.jspecify.annotations.Nullable;
 final class ReplicaCoordinator implements AutoCloseable {
     static final byte[] EMPTY_BODY = new byte[0];
 
+    private static final Result UNAVAILABLE = new Result(HttpURLConnection.HTTP_UNAVAILABLE, EMPTY_BODY);
     private static final String REPLICA_HEADER = "X-Near-Replica";
     private static final String REPLICA_REQUEST = "true";
     private static final int MIN_REPLICAS = 1;
@@ -35,7 +35,7 @@ final class ReplicaCoordinator implements AutoCloseable {
     private final RendezvousHash routing;
     private final int replicas;
     private final boolean discoverCluster;
-    private final @Nullable HttpClient client;
+    private final HttpClient client;
 
     ReplicaCoordinator(int port, Dao<byte[]> dao) {
         this(port, dao, new int[]{port}, MIN_REPLICAS, true);
@@ -57,8 +57,7 @@ final class ReplicaCoordinator implements AutoCloseable {
         this.dao = dao;
         this.replicas = replicas;
         this.discoverCluster = discoverCluster;
-        client = !discoverCluster && routing.size() == MIN_REPLICAS ? null
-            : HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT)
+        client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT)
             .version(HttpClient.Version.HTTP_1_1).build();
     }
 
@@ -67,7 +66,10 @@ final class ReplicaCoordinator implements AutoCloseable {
     }
 
     private RendezvousHash clusterRouting() {
-        String setting = discoverCluster ? System.getProperty("CLUSTER") : null;
+        if (!discoverCluster) {
+            return routing;
+        }
+        String setting = System.getProperty("CLUSTER");
         if (setting == null || setting.isBlank()) {
             return routing;
         }
@@ -91,13 +93,7 @@ final class ReplicaCoordinator implements AutoCloseable {
             if (replica == port) {
                 quorum.accept(executeLocal(dao, method, key, body));
             } else {
-                send(replica, method, key, body).whenComplete((response, error) -> {
-                    if (error != null) {
-                        quorum.accept(new Result(HttpURLConnection.HTTP_UNAVAILABLE, EMPTY_BODY));
-                    } else {
-                        quorum.accept(new Result(response.statusCode(), response.body()));
-                    }
-                });
+                send(replica, method, key, body).thenAccept(quorum::accept);
             }
         }
         return quorum.result;
@@ -120,17 +116,17 @@ final class ReplicaCoordinator implements AutoCloseable {
         } catch (NoSuchElementException e) {
             return new Result(HttpURLConnection.HTTP_NOT_FOUND, EMPTY_BODY);
         } catch (IOException e) {
-            return new Result(HttpURLConnection.HTTP_UNAVAILABLE, EMPTY_BODY);
+            return UNAVAILABLE;
         }
     }
 
-    private CompletableFuture<HttpResponse<byte[]>> send(int replica, String method, String key, byte[] body) {
+    private CompletableFuture<Result> send(int replica, String method, String key, byte[] body) {
         URI uri = URI.create("http://localhost:" + replica + "/v0/entity?id="
             + URLEncoder.encode(key, StandardCharsets.UTF_8));
         HttpRequest request = HttpRequest.newBuilder(uri).timeout(REQUEST_TIMEOUT)
             .header(REPLICA_HEADER, REPLICA_REQUEST)
             .method(method, HttpRequest.BodyPublishers.ofByteArray(body)).build();
-        CompletableFuture<HttpResponse<byte[]>> pending = Objects.requireNonNull(client)
+        CompletableFuture<HttpResponse<byte[]>> pending = client
             .sendAsync(request, HttpResponse.BodyHandlers.ofByteArray());
         CompletableFuture<HttpResponse<byte[]>> timed = pending.copy()
             .orTimeout(REQUEST_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -139,7 +135,8 @@ final class ReplicaCoordinator implements AutoCloseable {
                 pending.cancel(true);
             }
         });
-        return timed;
+        return timed.handle((response, error) -> error == null
+            ? new Result(response.statusCode(), response.body()) : UNAVAILABLE);
     }
 
     private static int successStatus(String method) {
@@ -153,9 +150,7 @@ final class ReplicaCoordinator implements AutoCloseable {
 
     @Override
     public void close() {
-        if (client != null) {
-            client.close();
-        }
+        client.close();
     }
 
     record Result(int status, byte[] body) {
@@ -182,28 +177,21 @@ final class ReplicaCoordinator implements AutoCloseable {
         }
 
         void accept(Result reply) {
-            @Nullable Result outcome = null;
+            @Nullable Result outcome;
             lock.lock();
             try {
                 if (resolved) {
                     return;
                 }
-                boolean valid = reply.status() == successStatus
-                    || read && reply.status() == HttpURLConnection.HTTP_NOT_FOUND;
-                if (valid) {
+                if (isConfirmation(reply)) {
                     confirmed++;
                     if (reply.status() == HttpURLConnection.HTTP_OK) {
                         successfulReply = reply;
                     }
-                    if (confirmed >= ack) {
-                        outcome = successfulReply;
-                    }
                 } else {
                     failed++;
-                    if (replicas - failed < ack) {
-                        outcome = new Result(HttpURLConnection.HTTP_UNAVAILABLE, EMPTY_BODY);
-                    }
                 }
+                outcome = quorumOutcome();
                 resolved = outcome != null;
             } finally {
                 lock.unlock();
@@ -211,6 +199,20 @@ final class ReplicaCoordinator implements AutoCloseable {
             if (outcome != null) {
                 result.complete(outcome);
             }
+        }
+
+        private boolean isConfirmation(Result reply) {
+            return reply.status() == successStatus || read && reply.status() == HttpURLConnection.HTTP_NOT_FOUND;
+        }
+
+        private @Nullable Result quorumOutcome() {
+            if (confirmed >= ack) {
+                return successfulReply;
+            }
+            if (replicas - failed < ack) {
+                return UNAVAILABLE;
+            }
+            return null;
         }
     }
 }
