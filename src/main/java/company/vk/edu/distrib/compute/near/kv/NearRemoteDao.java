@@ -16,14 +16,11 @@ public final class NearRemoteDao implements Dao<String> {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final int NOT_FOUND = 404;
 
-    private final String endpoint;
+    private final RendezvousHash routing;
     private final HttpClient client;
 
-    public NearRemoteDao(int port) {
-        if (port < 1 || port > 65535) {
-            throw new IllegalArgumentException("Port out of range");
-        }
-        endpoint = "http://localhost:" + port + "/v0/entity?id=";
+    public NearRemoteDao(int... ports) {
+        routing = new RendezvousHash(ports);
         client = HttpClient.newBuilder().connectTimeout(TIMEOUT).version(HttpClient.Version.HTTP_1_1).build();
     }
 
@@ -58,6 +55,7 @@ public final class NearRemoteDao implements Dao<String> {
         if (key.isEmpty()) {
             throw new IllegalArgumentException("Empty key");
         }
+        String endpoint = "http://localhost:" + routing.owner(key) + "/v0/entity?id=";
         return HttpRequest.newBuilder(URI.create(endpoint + URLEncoder.encode(key, StandardCharsets.UTF_8)))
             .timeout(TIMEOUT);
     }

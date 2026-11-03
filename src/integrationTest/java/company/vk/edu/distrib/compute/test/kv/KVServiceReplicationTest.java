@@ -85,7 +85,7 @@ class KVServiceReplicationTest {
 
                 stopNode(cluster); // 4 live nodes left
                 runHttpCtx(HTTP_CLIENT, randomNode(cluster), () ->
-                        assertEquals(200, delete(ENTITY_PATH + key + ack(4)).statusCode()));
+                        assertEquals(202, delete(ENTITY_PATH + key + ack(4)).statusCode()));
 
                 stopNode(cluster); // 3 live nodes left
                 runHttpCtx(HTTP_CLIENT, randomNode(cluster), () -> {
