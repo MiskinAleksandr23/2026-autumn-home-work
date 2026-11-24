@@ -15,7 +15,9 @@ import java.util.regex.Pattern;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import company.vk.edu.distrib.compute.Dao;
+import company.vk.edu.distrib.compute.near.moderation.ShortenerModeration;
 import company.vk.edu.distrib.compute.urlshortener.UrlShortenerService;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +42,8 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     private final SecureRandom random = new SecureRandom();
     private final Lock lifecycleLock = new ReentrantLock();
     private boolean started;
+    private @Nullable String kafkaBootstrapServers;
+    private @Nullable ShortenerModeration moderation;
 
     public NearUrlShortenerService(int port, Dao<String> links, Dao<String> users) throws IOException {
         this.port = port;
@@ -73,12 +77,32 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     }
 
     @Override
+    public void setKafkaBootstrapServers(String bootstrapServers) {
+        lifecycleLock.lock();
+        try {
+            if (started) {
+                throw new IllegalStateException("Service already used");
+            }
+            if (bootstrapServers.isBlank()) {
+                throw new IllegalArgumentException("Empty Kafka address");
+            }
+            kafkaBootstrapServers = bootstrapServers;
+        } finally {
+            lifecycleLock.unlock();
+        }
+    }
+
+    @Override
     public void start() {
         markStarted();
         try {
             server.bind(new InetSocketAddress(port), 0);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+        if (kafkaBootstrapServers != null) {
+            moderation = new ShortenerModeration(kafkaBootstrapServers, port, links);
+            moderation.start();
         }
         server.start();
     }
@@ -87,6 +111,9 @@ public final class NearUrlShortenerService implements UrlShortenerService {
     public void stop() {
         markStarted();
         server.stop(1);
+        if (moderation != null) {
+            moderation.close();
+        }
         try (users) {
             links.close();
         } catch (IOException e) {
@@ -179,6 +206,9 @@ public final class NearUrlShortenerService implements UrlShortenerService {
         String link = readLink(exchange);
         String id = newId();
         links.upsert(id, link);
+        if (moderation != null) {
+            moderation.created(id, link);
+        }
         respond(exchange, 201, "http://localhost:" + port + "/" + id);
     }
 
